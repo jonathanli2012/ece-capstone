@@ -38,4 +38,7 @@ class queue_struct:
     self.current_len = 0
     self.queue = [None] * self.max_size
   
+  def cpy_queue(self):
+    return None
+  
 p1 = queue_struct(512)
