@@ -1,0 +1,250 @@
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0, width=device-width" />
+    <script src="https://js.api.here.com/v3/3.1/mapsjs-core.js"
+    type="text/javascript" charset="utf-8"></script>
+    <script src="https://js.api.here.com/v3/3.1/mapsjs-service.js"
+    type="text/javascript" charset="utf-8"></script>
+    <script src="https://js.api.here.com/v3/3.1/mapsjs-mapevents.js"
+    type="text/javascript" charset="utf-8"></script>
+    <script src="https://js.api.here.com/v3/3.1/mapsjs-ui.js"
+    type="text/javascript" charset="utf-8"></script>
+  </head>
+  <body>
+    <div style="width: 640px; height: 480px" id="mapContainer"></div>
+    <div id="panel"></div>
+    <script>
+//  'apikey': 'drD_eufyBKD8gBUzK0z10YLAB-1qSUhoX0K5rR_xehA'
+      // Initialize the platform object:
+    // Instantiate a map and platform object:
+    var platform = new H.service.Platform({
+    'apikey': 'drD_eufyBKD8gBUzK0z10YLAB-1qSUhoX0K5rR_xehA'
+    });
+    // Retrieve the target element for the map:
+    var targetElement = document.getElementById('mapContainer');
+
+    // Get the default map types from the platform object:
+    var defaultLayers = platform.createDefaultLayers();
+    
+    
+    var routeInstructionsContainer = document.getElementById('panel');
+    var allText;
+    var avoid;
+    readTextFile("crash.txt");
+
+    if (allText == "1") {
+        avoid = 'bbox:-79.934298,40.448286,-79.934132,40.448482';
+    }
+    else {
+        avoid = 'bbox';
+    }
+
+    var bubble;
+    // Instantiate the map:
+    var map = new H.Map(
+    document.getElementById('mapContainer'),
+    defaultLayers.vector.normal.map,
+    {
+        zoom: 10,
+        center: { lat: 52.51, lng: 13.4 }
+    });
+    map.addLayer(defaultLayers.vector.normal.traffic);
+
+    // Create the parameters for the routing request:
+    if (allText == "1") {
+        var routingParameters = {
+        routingMode: 'fast',
+        transportMode: 'car',
+        optimizeFor: 'quality',
+        // The start point of the route:
+        origin: '40.449320,-79.933440',
+        // The end point of the route:
+        destination: '40.448040,-79.942420',
+        'avoid[areas]': avoid,
+        // 'avoid[areas]': 'bbox:-79.934298,40.448286,-79.934132,40.448482',
+        // 'avoid[areas]': 'bbox:-79.934298,40.448286,-79.934132,40.448482|bbox:-79.941046,40.451152,-79.940756,40.451511',
+
+        // Include the route shape in the response
+        return: 'polyline,turnByTurnActions,actions,instructions,travelSummary'
+        };
+    }
+    else {
+        var routingParameters = {
+        routingMode: 'fast',
+        transportMode: 'car',
+        optimizeFor: 'quality',
+        // The start point of the route:
+        origin: '40.449320,-79.933440',
+        // The end point of the route:
+        destination: '40.448040,-79.942420',
+        // 'avoid[areas]': avoid,
+        // 'avoid[areas]': 'bbox:-79.934298,40.448286,-79.934132,40.448482',
+        // 'avoid[areas]': 'bbox:-79.934298,40.448286,-79.934132,40.448482|bbox:-79.941046,40.451152,-79.940756,40.451511',
+
+        // Include the route shape in the response
+        return: 'polyline,turnByTurnActions,actions,instructions,travelSummary'
+        };        
+    }
+    window.addEventListener('resize', () => map.getViewPort().resize());
+    var behavior = new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
+    var ui = H.ui.UI.createDefault(map, defaultLayers);
+
+    // Define a callback function to process the routing response:
+    var onResult = function(result) {
+    addDotsToMap(result.routes[0]);
+    addSummaryToPanel(result.routes[0]);
+    addManueversToPanel(result.routes[0]);
+    // ensure that at least one route was found
+    if (result.routes.length) {
+        result.routes[0].sections.forEach((section) => {
+            // Create a linestring to use as a point source for the route line
+            let linestring = H.geo.LineString.fromFlexiblePolyline(section.polyline);
+
+            // Create a polyline to display the route:
+            let routeLine = new H.map.Polyline(linestring, {
+            style: { strokeColor: 'blue', lineWidth: 3 }
+            });
+
+            // Create a marker for the start point:
+            let startMarker = new H.map.Marker(section.departure.place.location);
+
+            // Create a marker for the end point:
+            let endMarker = new H.map.Marker(section.arrival.place.location);
+
+            // Add the route polyline and the two markers to the map:
+            map.addObjects([routeLine, startMarker, endMarker]);
+
+            // Set the map's viewport to make the whole route visible:
+            map.getViewModel().setLookAtData({bounds: routeLine.getBoundingBox()});
+        });
+    }
+    };
+    function openBubble(position, text) {
+        if (!bubble) {
+            bubble = new H.ui.InfoBubble(
+            position,
+            // The FO property holds the province name.
+            {content: text});
+            ui.addBubble(bubble);
+        } else {
+            bubble.setPosition(position);
+            bubble.setContent(text);
+            bubble.open();
+        }
+        }
+
+    function addDotsToMap(route) {
+        var svgMarkup = '<svg width="18" height="18" ' +
+            'xmlns="http://www.w3.org/2000/svg">' +
+            '<circle cx="8" cy="8" r="8" ' +
+            'fill="#1b468d" stroke="white" stroke-width="1" />' +
+            '</svg>',
+            dotIcon = new H.map.Icon(svgMarkup, {anchor: {x:8, y:8}}),
+            group = new H.map.Group(),
+            i,
+            j;
+
+        route.sections.forEach((section) => {
+            let poly = H.geo.LineString.fromFlexiblePolyline(section.polyline).getLatLngAltArray();
+
+            let actions = section.actions;
+            // Add a marker for each maneuver
+            for (i = 0; i < actions.length; i += 1) {
+            let action = actions[i];
+            var marker = new H.map.Marker({
+                lat: poly[action.offset * 3],
+                lng: poly[action.offset * 3 + 1]},
+                {icon: dotIcon});
+            marker.instruction = action.instruction;
+            group.addObject(marker);
+            }
+            // group.addEventListener('tap', function (evt) {
+            // map.setCenter(evt.target.getGeometry());
+            // openBubble(evt.target.getGeometry(), evt.target.instruction);
+            // }, false);
+
+            // Add the maneuvers group to the map
+            map.addObject(group);
+        });
+        }
+    function addSummaryToPanel(route) {
+        let duration = 0,
+            distance = 0;
+
+        route.sections.forEach((section) => {
+            distance += section.travelSummary.length;
+            duration += section.travelSummary.duration;
+        });
+
+        var summaryDiv = document.createElement('div'),
+            content = '<b>Total distance</b>: ' + distance + 'm. <br />' +
+            '<b>Travel Time</b>: ' + toMMSS(duration) + ' (in current traffic)';
+
+        summaryDiv.style.fontSize = 'small';
+        summaryDiv.style.marginLeft = '5%';
+        summaryDiv.style.marginRight = '5%';
+        summaryDiv.innerHTML = content;
+        routeInstructionsContainer.appendChild(summaryDiv);
+}
+    function toMMSS(duration) {
+  return Math.floor(duration / 60) + ' minutes ' + (duration % 60) + ' seconds.';
+}
+function addManueversToPanel(route) {
+  var nodeOL = document.createElement('ol');
+
+  nodeOL.style.fontSize = 'small';
+  nodeOL.style.marginLeft ='5%';
+  nodeOL.style.marginRight ='5%';
+  nodeOL.className = 'directions';
+
+  route.sections.forEach((section) => {
+    section.actions.forEach((action, idx) => {
+      var li = document.createElement('li'),
+        spanArrow = document.createElement('span'),
+        spanInstruction = document.createElement('span');
+
+      spanArrow.className = 'arrow ' + (action.direction || '') + action.action;
+      spanInstruction.innerHTML = section.actions[idx].instruction;
+      li.appendChild(spanArrow);
+      li.appendChild(spanInstruction);
+
+      nodeOL.appendChild(li);
+    });
+  });
+
+  routeInstructionsContainer.appendChild(nodeOL);
+}
+function readTextFile(file)
+{
+    var rawFile = new XMLHttpRequest();
+    rawFile.open("GET", file, false);
+    rawFile.onreadystatechange = function ()
+    {
+        if(rawFile.readyState === 4)
+        {
+            if(rawFile.status === 200 || rawFile.status == 0)
+            {
+                allText = rawFile.responseText;
+                console.log(allText);
+            }
+        }
+    }
+    rawFile.send(null);
+
+}
+
+    // Get an instance of the routing service version 8:
+    var router = platform.getRoutingService(null, 8);
+
+    // Call calculateRoute() with the routing parameters,
+    // the callback and an error callback function (called if a
+    // communication error occurs):
+    router.calculateRoute(routingParameters, onResult,
+    function(error) {
+        alert(error.message);
+    });
+
+    </script>
+
+  </body>
+</html>
